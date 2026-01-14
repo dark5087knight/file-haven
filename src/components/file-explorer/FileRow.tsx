@@ -13,11 +13,12 @@ import {
 interface FileRowProps {
   item: FileItem;
   isSelected: boolean;
-  onSelect: () => void;
+  onSelect: (mode: 'single' | 'toggle' | 'range') => void;
   onOpen: () => void;
   onDownload: () => void;
   onDelete: () => void;
   onProperties: () => void;
+  isRoot?: boolean;
 }
 
 export function FileRow({
@@ -28,6 +29,7 @@ export function FileRow({
   onDownload,
   onDelete,
   onProperties,
+  isRoot = false,
 }: FileRowProps) {
   const handleDoubleClick = () => {
     if (item.isDirectory) {
@@ -40,8 +42,18 @@ export function FileRow({
       if (item.isDirectory) {
         onOpen();
       } else {
-        onSelect();
+        onSelect('single');
       }
+    }
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.shiftKey) {
+      onSelect('range');
+    } else if (e.metaKey || e.ctrlKey) {
+      onSelect('toggle');
+    } else {
+      onSelect('single');
     }
   };
 
@@ -50,7 +62,7 @@ export function FileRow({
       className={`grid grid-cols-12 gap-4 px-4 py-2.5 items-center cursor-pointer transition-colors border-b border-border/50 hover:bg-accent/50 ${
         isSelected ? 'bg-accent' : ''
       }`}
-      onClick={onSelect}
+      onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onKeyDown={handleKeyDown}
       tabIndex={0}
@@ -100,13 +112,16 @@ export function FileRow({
               <Info className="h-4 w-4 mr-2" />
               Properties
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={onDelete}
-              className="text-destructive focus:text-destructive"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Delete
-            </DropdownMenuItem>
+            {/* Delete option is ONLY visible to root users */}
+            {isRoot && (
+              <DropdownMenuItem
+                onClick={onDelete}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

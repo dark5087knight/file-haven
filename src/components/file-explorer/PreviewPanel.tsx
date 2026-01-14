@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { FileItem, FilePreview as FilePreviewType } from '@/types/files';
-import { getMockPreview } from '@/lib/mock-data';
 import { formatFileSize } from '@/lib/format';
 import { FileIcon } from './FileIcon';
 import { X, Download, FileX } from 'lucide-react';
@@ -8,14 +7,16 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
+import { fetchPreview } from '@/lib/api';
 
 interface PreviewPanelProps {
   item: FileItem | null;
+  rootId?: string;
   onClose: () => void;
   onDownload: () => void;
 }
 
-export function PreviewPanel({ item, onClose, onDownload }: PreviewPanelProps) {
+export function PreviewPanel({ item, rootId, onClose, onDownload }: PreviewPanelProps) {
   const [preview, setPreview] = useState<FilePreviewType | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -26,15 +27,29 @@ export function PreviewPanel({ item, onClose, onDownload }: PreviewPanelProps) {
     }
 
     setLoading(true);
-    // Simulate API call
-    const timer = setTimeout(() => {
-      const data = getMockPreview(item.path);
-      setPreview(data);
-      setLoading(false);
-    }, 200);
+    let active = true;
+    fetchPreview(item.path, rootId)
+      .then(data => {
+        if (!active) return;
+        setPreview(data);
+      })
+      .catch(err => {
+        if (!active) return;
+        toast({
+          title: 'Preview unavailable',
+          description: (err as Error).message,
+          variant: 'destructive',
+        });
+        setPreview({ path: item.path, type: 'unsupported', size: item.size });
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
-    return () => clearTimeout(timer);
-  }, [item]);
+    return () => {
+      active = false;
+    };
+  }, [item, rootId]);
 
   if (!item) return null;
 

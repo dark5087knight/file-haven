@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Folder, FolderOpen } from 'lucide-react';
 import { TreeNode } from '@/types/files';
-import { getMockTree } from '@/lib/mock-data';
 import { Skeleton } from '@/components/ui/skeleton';
+import { fetchTree } from '@/lib/api';
 
 interface DirectoryTreeProps {
   currentPath: string;
+  rootId?: string;
   onNavigate: (path: string) => void;
 }
 
@@ -76,18 +77,26 @@ function TreeItem({ node, level, currentPath, onNavigate }: TreeItemProps) {
   );
 }
 
-export function DirectoryTree({ currentPath, onNavigate }: DirectoryTreeProps) {
+export function DirectoryTree({ currentPath, rootId, onNavigate }: DirectoryTreeProps) {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Simulate loading
-    const timer = setTimeout(() => {
-      setTree(getMockTree());
-      setLoading(false);
-    }, 200);
-    return () => clearTimeout(timer);
-  }, []);
+    let active = true;
+    setLoading(true);
+    fetchTree('/', rootId)
+      .then((data) => {
+        if (!active) return;
+        setTree(data);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [rootId]);
 
   if (loading) {
     return (

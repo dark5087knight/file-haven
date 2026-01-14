@@ -7,20 +7,21 @@ import { FolderOpen } from 'lucide-react';
 interface FileListProps {
   items: FileItem[];
   loading: boolean;
-  selectedItem: FileItem | null;
+  selectedItems: FileItem[];
   sortConfig: SortConfig;
   onSort: (field: SortField) => void;
-  onSelectItem: (item: FileItem) => void;
+  onSelectItem: (item: FileItem, mode: 'single' | 'toggle' | 'range') => void;
   onOpenDirectory: (path: string) => void;
   onDownload: (item: FileItem) => void;
   onDelete: (item: FileItem) => void;
   onProperties: (item: FileItem) => void;
+  isRoot?: boolean;
 }
 
 export function FileList({
   items,
   loading,
-  selectedItem,
+  selectedItems,
   sortConfig,
   onSort,
   onSelectItem,
@@ -28,6 +29,7 @@ export function FileList({
   onDownload,
   onDelete,
   onProperties,
+  isRoot = false,
 }: FileListProps) {
   if (loading) {
     return <FileListSkeleton />;
@@ -51,12 +53,13 @@ export function FileList({
           <FileRow
             key={item.path}
             item={item}
-            isSelected={selectedItem?.path === item.path}
-            onSelect={() => onSelectItem(item)}
+            isSelected={selectedItems.some(i => i.path === item.path)}
+            onSelect={(mode) => onSelectItem(item, mode)}
             onOpen={() => item.isDirectory && onOpenDirectory(item.path)}
             onDownload={() => onDownload(item)}
             onDelete={() => onDelete(item)}
             onProperties={() => onProperties(item)}
+            isRoot={isRoot}
           />
         ))}
       </div>

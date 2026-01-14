@@ -1,0 +1,19 @@
+{
+  "systemPaths": [
+    {
+      "id": "root",
+      "name": "Root",
+      "path": "/"
+    }
+  ],
+  "userPaths": [
+    {
+      "id": "downloads",
+      "path": "/mnt/jilly/movies"
+    },
+    {
+      "id": "anime",
+      "path": "/mnt/jilly/anime"
+    }
+  ]
+}

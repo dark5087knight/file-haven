@@ -1,0 +1,17 @@
+{
+  "root": {
+    "username": "root",
+    "password": "root",
+    "role": "root"
+  },
+  "obaida": {
+    "username": "obaida",
+    "password": "obaida",
+    "role": "user"
+  },
+  "abd": {
+    "username": "abd",
+    "password": "abd",
+    "role": "user"
+  }
+}
