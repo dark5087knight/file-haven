@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs/promises";
+import * as fsSync from "fs";
 import * as crypto from "crypto";
 import cookieParser from "cookie-parser";
 import multer from "multer";
@@ -36,6 +37,23 @@ try {
 } catch (err) {
   console.warn("Could not load roots.json, using default root");
   pathsConfig = { systemPaths: [{ id: "default", name: "Root", path: process.env.ROOT_DIR || "." }], userPaths: [] };
+}
+
+// Load application configuration
+interface AppConfig {
+  upload?: {
+    tempDirectory?: string;
+  };
+}
+
+let appConfig: AppConfig = {};
+try {
+  const configPath = path.join(process.cwd(), "config", "config.json");
+  const configContent = await fs.readFile(configPath, "utf8");
+  appConfig = JSON.parse(configContent);
+} catch (err) {
+  console.warn("Could not load config/config.json, using defaults");
+  appConfig = { upload: { tempDirectory: "temp-uploads" } };
 }
 
 // Helper function to extract endpoint directory name from path
@@ -356,9 +374,39 @@ app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
 
-// Configure multer for file uploads (memory storage for temporary files)
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+// Increase timeout for large file uploads (1 day)
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+app.use((req, res, next) => {
+  req.setTimeout(ONE_DAY_MS); // 1 day
+  res.setTimeout(ONE_DAY_MS); // 1 day
+  next();
+});
+
+// Configure multer for file uploads (disk storage for large files)
+// Use temp directory for uploads to avoid memory issues with large files
+// Get temp directory from config, default to 'temp-uploads' if not specified
+const tempDirName = appConfig.upload?.tempDirectory || 'temp-uploads';
+const uploadDir = path.join(process.cwd(), tempDirName);
+// Ensure temp directory exists
+fsSync.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename to avoid conflicts
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, `upload-${uniqueSuffix}-${file.originalname}`);
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 * 1024, // 10GB max file size
+  }
+});
 
 function resolveSafe(requestPath: string, rootId?: string) {
   const root = getRoot(rootId);
@@ -655,7 +703,66 @@ app.get("/api/download", requireAuth, async (req, res) => {
   }
 });
 
+// Endpoint to move file from temp to final location
+// Note: Progress tracking for file moves is handled client-side via polling
+// since we can't easily track server-side file copy progress with XHR
+app.post("/api/upload/move", requireAuth, async (req, res) => {
+  let tempFilePath: string | null = null;
+  
+  try {
+    const { tempFilePath: tempPath, targetPath: finalPath } = req.body;
+    const username = (req as any).username;
+    
+    if (!tempPath || !finalPath) {
+      return res.status(400).json({ error: "tempFilePath and targetPath are required" });
+    }
+    
+    // At this point, tempPath is guaranteed to be non-null
+    const tempPathToUse = tempPath as string;
+    tempFilePath = tempPathToUse;
+    
+    // Get file size
+    const fileStats = await fs.stat(tempPathToUse);
+    const fileSize = fileStats.size;
+    
+    // Stream file from temp location to final destination
+    const readStream = fsSync.createReadStream(tempPathToUse);
+    const writeStream = fsSync.createWriteStream(finalPath);
+    
+    // Pipe the file stream
+    await new Promise<void>((resolve, reject) => {
+      readStream.pipe(writeStream);
+      readStream.on('error', reject);
+      writeStream.on('error', reject);
+      writeStream.on('finish', resolve);
+    });
+    
+    // Clean up temp file
+    await fs.unlink(tempPathToUse);
+    tempFilePath = null;
+    
+    res.json({ 
+      success: true, 
+      message: "File moved successfully",
+      fileSize: fileSize
+    });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  } finally {
+    // Clean up temp file if still exists
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (err) {
+        console.warn(`Failed to cleanup temp file: ${tempFilePath}`, err);
+      }
+    }
+  }
+});
+
 app.post("/api/upload", requireAuth, upload.single("file"), async (req, res) => {
+  let tempFilePath: string | null = null;
+  
   try {
     const requestPath = (req.body.path as string) || "/";
     const rootId = req.body.rootId as string | undefined;
@@ -695,12 +802,35 @@ app.post("/api/upload", requireAuth, upload.single("file"), async (req, res) => 
       // File doesn't exist, which is what we want - continue with upload
     }
     
-    // Write file to target directory
-    await fs.writeFile(targetPath, req.file.buffer);
+    // Get temp file path from multer disk storage
+    tempFilePath = req.file.path;
     
-    res.json({ success: true, message: `File ${filename} uploaded successfully` });
+    // Don't clean up temp file here - it will be cleaned up after move
+    // Set to null so finally block doesn't delete it
+    const tempPath = tempFilePath;
+    tempFilePath = null;
+    
+    // Return temp file info - the move will happen in a separate call
+    // This allows us to track move progress separately
+    res.json({ 
+      success: true, 
+      message: `File uploaded to temp location`,
+      tempFilePath: tempPath,
+      targetPath: targetPath,
+      filename: filename
+    });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
+  } finally {
+    // Clean up temp file
+    if (tempFilePath) {
+      try {
+        await fs.unlink(tempFilePath);
+      } catch (err) {
+        // Ignore cleanup errors
+        console.warn(`Failed to cleanup temp file: ${tempFilePath}`, err);
+      }
+    }
   }
 });
 
@@ -986,12 +1116,17 @@ userManager.initUserDB().then(async () => {
   // Initialize paths with existence check
   await initializePaths();
   
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`File API running on http://localhost:${PORT}`);
     console.log(`System paths: ${systemPaths.map((r) => `${r.name} (${r.path})${r.exists ? "" : " [NOT FOUND]"}`).join(", ") || "none"}`);
     console.log(`User paths: ${userPaths.map((r) => `${r.name} (${r.path})${r.exists ? "" : " [NOT FOUND]"}`).join(", ") || "none"}`);
     console.log(`User database: data/users.json (plain text passwords)`);
+    console.log(`Upload temp directory: ${uploadDir}`);
   });
+  
+  // Set server timeout for large file uploads (1 day)
+  server.timeout = ONE_DAY_MS; // 1 day
+  server.keepAliveTimeout = ONE_DAY_MS; // 1 day
 }).catch(err => {
   console.error("Failed to initialize users DB:", err);
   process.exit(1);

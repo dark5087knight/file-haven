@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Temporary upload directory
+temp-uploads/
+
+# Config directory (if you want to ignore it, uncomment below)
+# config/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

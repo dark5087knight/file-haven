@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Folder icon with file inside -->
+  <defs>
+    <linearGradient id="folderGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="fileGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Folder -->
+  <path d="M15 25 L15 75 L85 75 L85 35 L50 35 L45 25 Z" fill="url(#folderGradient)" stroke="#1e3a8a" stroke-width="2"/>
+  
+  <!-- Folder tab -->
+  <path d="M15 25 L45 25 L50 35 L15 35 Z" fill="#1e40af"/>
+  
+  <!-- File inside folder -->
+  <rect x="30" y="45" width="35" height="20" rx="2" fill="url(#fileGradient)" stroke="#1e3a8a" stroke-width="1.5"/>
+  <line x1="35" y1="52" x2="55" y2="52" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="35" y1="58" x2="50" y2="58" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

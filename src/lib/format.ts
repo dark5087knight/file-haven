@@ -1,13 +1,27 @@
 import { format, formatDistanceToNow } from 'date-fns';
 
 export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '—';
+  // Handle invalid or zero values
+  if (!bytes || bytes === 0 || isNaN(bytes) || !isFinite(bytes)) {
+    return '—';
+  }
   
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const k = 1024;
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const KB = 1024;
+  const MB = 1024 * 1024;
+  const GB = 1024 * 1024 * 1024;
   
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${units[i]}`;
+  // If less than 1MB, show in KB
+  if (bytes < MB) {
+    return `${(bytes / KB).toFixed(2)} KB`;
+  }
+  
+  // If less than 1GB, show in MB
+  if (bytes < GB) {
+    return `${(bytes / MB).toFixed(2)} MB`;
+  }
+  
+  // If 1GB or more, show in GB
+  return `${(bytes / GB).toFixed(2)} GB`;
 }
 
 export function formatDate(dateString: string): string {

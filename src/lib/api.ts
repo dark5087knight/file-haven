@@ -186,24 +186,105 @@ export async function deletePath(id: string): Promise<void> {
   await handleResponse(res);
 }
 
-// File Upload API
-export async function uploadFile(file: File, path: string, rootId?: string, filename?: string): Promise<void> {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('path', path);
-  if (rootId) {
-    formData.append('rootId', rootId);
-  }
-  if (filename) {
-    formData.append('filename', filename);
-  }
-  
-  const res = await fetch('/api/upload', {
-    method: 'POST',
-    credentials: 'include',
-    body: formData,
+// File Upload API with progress tracking
+export interface UploadProgress {
+  loaded: number; // bytes uploaded
+  total: number; // total bytes
+  percentage: number; // 0-100
+  speed: number; // MB/s
+}
+
+export interface UploadResponse {
+  success: boolean;
+  message: string;
+  tempFilePath: string;
+  targetPath: string;
+  filename: string;
+}
+
+export function uploadFile(
+  file: File,
+  path: string,
+  rootId: string | undefined,
+  filename: string | undefined,
+  onProgress?: (progress: UploadProgress) => void
+): Promise<UploadResponse> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('path', path);
+    if (rootId) {
+      formData.append('rootId', rootId);
+    }
+    if (filename) {
+      formData.append('filename', filename);
+    }
+
+    const xhr = new XMLHttpRequest();
+    const startTime = Date.now();
+    let lastLoaded = 0;
+    let lastTime = startTime;
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onProgress) {
+        const currentTime = Date.now();
+        const timeDiff = (currentTime - lastTime) / 1000; // seconds
+        const loadedDiff = e.loaded - lastLoaded; // bytes
+        
+        // Calculate speed in MB/s
+        let speed = 0;
+        if (timeDiff > 0) {
+          speed = (loadedDiff / (1024 * 1024)) / timeDiff; // MB/s
+        }
+
+        const progress: UploadProgress = {
+          loaded: e.loaded,
+          total: e.total,
+          percentage: (e.loaded / e.total) * 100,
+          speed: speed,
+        };
+
+        onProgress(progress);
+        lastLoaded = e.loaded;
+        lastTime = currentTime;
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          // Validate response has required fields
+          if (response && response.tempFilePath && response.targetPath) {
+            resolve(response as UploadResponse);
+          } else {
+            reject(new Error('Invalid response from server: missing required fields'));
+          }
+        } catch (err) {
+          reject(new Error('Failed to parse server response'));
+        }
+      } else {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          reject(new Error(response.error || 'Upload failed'));
+        } catch {
+          reject(new Error(`Upload failed with status ${xhr.status}`));
+        }
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      reject(new Error('Network error during upload'));
+    });
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload cancelled'));
+    });
+
+    xhr.open('POST', '/api/upload');
+    xhr.withCredentials = true; // Include credentials
+    xhr.send(formData);
   });
-  await handleResponse(res);
 }
 
 // Directory Creation API
@@ -217,5 +298,88 @@ export async function createDirectory(path: string, name: string, rootId?: strin
     body: JSON.stringify({ path, rootId, name }),
   });
   await handleResponse(res);
+}
+
+// Move uploaded file from temp to final location with progress tracking
+export function moveUploadedFile(
+  tempFilePath: string,
+  targetPath: string,
+  fileSize: number,
+  onProgress?: (progress: UploadProgress) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let lastTime = Date.now();
+    let lastLoaded = 0;
+    let currentProgress = 0;
+    
+    // Simulate progress for move operation
+    // Since we can't easily track actual server-side copy progress, we estimate based on time
+    const startTime = Date.now();
+    const estimatedDuration = Math.max(1000, fileSize / (10 * 1024 * 1024) * 1000); // Estimate based on 10MB/s
+    
+    const progressInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      currentProgress = Math.min(95, (elapsed / estimatedDuration) * 100);
+      
+      if (onProgress) {
+        const now = Date.now();
+        const timeDiff = (now - lastTime) / 1000;
+        const loaded = (fileSize * currentProgress) / 100;
+        const loadedDiff = loaded - lastLoaded;
+        const speed = timeDiff > 0 ? (loadedDiff / (1024 * 1024)) / timeDiff : 0;
+        
+        onProgress({
+          loaded: loaded,
+          total: fileSize,
+          percentage: currentProgress,
+          speed: speed,
+        });
+        
+        lastTime = now;
+        lastLoaded = loaded;
+      }
+    }, 100); // Update every 100ms
+    
+    xhr.addEventListener('load', () => {
+      clearInterval(progressInterval);
+      
+      // Set to 100% on completion
+      if (onProgress) {
+        onProgress({
+          loaded: fileSize,
+          total: fileSize,
+          percentage: 100,
+          speed: 0,
+        });
+      }
+      
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          reject(new Error(response.error || 'Move failed'));
+        } catch {
+          reject(new Error('Move failed'));
+        }
+      }
+    });
+    
+    xhr.addEventListener('error', () => {
+      clearInterval(progressInterval);
+      reject(new Error('Network error during move'));
+    });
+    
+    xhr.addEventListener('abort', () => {
+      clearInterval(progressInterval);
+      reject(new Error('Move cancelled'));
+    });
+    
+    xhr.open('POST', '/api/upload/move');
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.withCredentials = true;
+    xhr.send(JSON.stringify({ tempFilePath, targetPath }));
+  });
 }
 

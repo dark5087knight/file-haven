@@ -3,6 +3,7 @@ import { Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 import {
   Dialog,
   DialogContent,
@@ -11,8 +12,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { uploadFile } from '@/lib/api';
+import { uploadFile, moveUploadedFile, UploadProgress, UploadResponse } from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
+import { formatFileSize } from '@/lib/format';
 
 interface UploadFileDialogProps {
   open: boolean;
@@ -26,13 +28,25 @@ export function UploadFileDialog({ open, onOpenChange, currentPath, rootId, onSu
   const [file, setFile] = useState<File | null>(null);
   const [filename, setFilename] = useState('');
   const [loading, setLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [moveProgress, setMoveProgress] = useState<UploadProgress | null>(null);
+  const [uploadPhase, setUploadPhase] = useState<'upload' | 'move' | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      setFilename(selectedFile.name);
+    try {
+      const selectedFile = e.target.files?.[0];
+      if (selectedFile) {
+        setFile(selectedFile);
+        setFilename(selectedFile.name);
+      }
+    } catch (err) {
+      console.error('Error selecting file:', err);
+      toast({
+        title: 'Error',
+        description: 'Failed to select file',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -41,6 +55,9 @@ export function UploadFileDialog({ open, onOpenChange, currentPath, rootId, onSu
     if (!open) {
       setFile(null);
       setFilename('');
+      setUploadProgress(null);
+      setMoveProgress(null);
+      setUploadPhase(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -69,25 +86,66 @@ export function UploadFileDialog({ open, onOpenChange, currentPath, rootId, onSu
     }
 
     setLoading(true);
+    const fileSize = file?.size || 0;
+    setUploadProgress({ loaded: 0, total: fileSize, percentage: 0, speed: 0 });
+    setUploadPhase('upload');
+    
     try {
-      await uploadFile(file, currentPath, rootId, filename.trim());
+      // Step 1: Upload to temp location
+      const uploadResponse: UploadResponse = await uploadFile(
+        file,
+        currentPath,
+        rootId,
+        filename.trim(),
+        (progress) => {
+          setUploadProgress(progress);
+        }
+      );
+      
+      // Validate upload response
+      if (!uploadResponse || !uploadResponse.tempFilePath || !uploadResponse.targetPath) {
+        throw new Error('Invalid response from server: missing file information');
+      }
+      
+      // Step 2: Move from temp to final location
+      setUploadPhase('move');
+      const fileSize = file?.size || 0;
+      setMoveProgress({ loaded: 0, total: fileSize, percentage: 0, speed: 0 });
+      
+      await moveUploadedFile(
+        uploadResponse.tempFilePath,
+        uploadResponse.targetPath,
+        fileSize,
+        (progress) => {
+          setMoveProgress(progress);
+        }
+      );
+      
       toast({
         title: 'Success',
         description: `File ${filename.trim()} uploaded successfully`,
       });
       setFile(null);
       setFilename('');
+      setUploadProgress(null);
+      setMoveProgress(null);
+      setUploadPhase(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
       onOpenChange(false);
       onSuccess();
     } catch (err) {
+      console.error('Upload error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to upload file';
       toast({
         title: 'Error',
-        description: (err as Error).message || 'Failed to upload file',
+        description: errorMessage,
         variant: 'destructive',
       });
+      setUploadProgress(null);
+      setMoveProgress(null);
+      setUploadPhase(null);
     } finally {
       setLoading(false);
     }
@@ -119,7 +177,7 @@ export function UploadFileDialog({ open, onOpenChange, currentPath, rootId, onSu
               />
               {file && (
                 <p className="text-sm text-muted-foreground">
-                  Selected: {file.name} ({(file.size / 1024).toFixed(2)} KB)
+                  Selected: {file.name} ({formatFileSize(file?.size || 0)})
                 </p>
               )}
             </div>
@@ -133,6 +191,24 @@ export function UploadFileDialog({ open, onOpenChange, currentPath, rootId, onSu
                   placeholder="Enter filename"
                   disabled={loading}
                 />
+              </div>
+            )}
+            {uploadProgress && uploadPhase === 'upload' && (
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground mb-1">Uploading to server...</div>
+                <Progress value={uploadProgress.percentage} className="h-2" />
+                <div className="text-center text-sm text-muted-foreground">
+                  {uploadProgress.speed > 0 ? `${uploadProgress.speed.toFixed(2)} MB/s` : 'Calculating...'}
+                </div>
+              </div>
+            )}
+            {moveProgress && uploadPhase === 'move' && (
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground mb-1">Moving to final location...</div>
+                <Progress value={moveProgress.percentage} className="h-2" />
+                <div className="text-center text-sm text-muted-foreground">
+                  {moveProgress.speed > 0 ? `${moveProgress.speed.toFixed(2)} MB/s` : 'Calculating...'}
+                </div>
               </div>
             )}
           </div>
@@ -154,3 +230,4 @@ export function UploadFileDialog({ open, onOpenChange, currentPath, rootId, onSu
     </Dialog>
   );
 }
+
